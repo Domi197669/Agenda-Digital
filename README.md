@@ -51,8 +51,9 @@ En la pestaña **Nube → "Mi Nube Personal"** puedes conectar tu propia nube y 
 4. Pulsa **"Guardar y conectar"**. La carpeta padre debe existir y permitir escritura.
 
 ### Sincronizar
-- **Subir datos**: sube tus datos locales a tu nube.
-- **Descargar datos**: descarga el respaldo de tu nube y reemplaza los datos locales (pide confirmación).
+- **Subir datos**: sube tus datos locales a tu nube. Antes de subir, **fusiona** con el respaldo remoto para no perder cambios hechos en otros dispositivos.
+- **Descargar datos**: descarga el respaldo de tu nube y lo **fusiona** con los datos locales (pide confirmación).
+- **Fusión**: se unen los elementos de ambos lados; cuando el mismo elemento fue modificado en ambos, gana la versión más reciente. Eliminaciones en un solo dispositivo no se propagan a la nube.
 - La **auto-sincronización** sube los cambios automáticamente tras cada edición si está activa.
 
 ## 🧑‍💻 Desarrollo

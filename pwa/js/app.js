@@ -559,6 +559,38 @@ function applyBackup(data) {
   renderAll();
 }
 
+function itemChangeTime(item) {
+  return item.updatedAtMillis || item.createdAtMillis || 0;
+}
+
+function mergeItemList(localArr, remoteArr) {
+  const map = new Map();
+  for (const it of localArr) map.set(Number(it.id), { item: it });
+  for (const it of remoteArr) {
+    const id = Number(it.id);
+    const existing = map.get(id);
+    if (!existing) {
+      map.set(id, { item: it });
+    } else if (itemChangeTime(it) > itemChangeTime(existing.item)) {
+      existing.item = it;
+    }
+  }
+  return [...map.values()].map((v) => v.item);
+}
+
+function mergeBackups(localData, remoteData) {
+  if (!isValidBackup(localData)) throw new Error('Los datos locales no son un respaldo válido');
+  if (!isValidBackup(remoteData)) throw new Error('El respaldo de la nube no es válido');
+  return {
+    appName: 'AgendaDigital',
+    appVersion: 1,
+    exportDateMillis: Date.now(),
+    agendaItems: mergeItemList(localData.agendaItems, remoteData.agendaItems),
+    notes: mergeItemList(localData.notes, remoteData.notes),
+    habits: mergeItemList(localData.habits, remoteData.habits)
+  };
+}
+
 function setSyncStatus(status, message) {
   state.syncStatus = status;
   state.syncError = message || '';
@@ -718,10 +750,9 @@ async function createDriveFile() {
   }
 }
 
-async function pushGoogleDrive() {
+async function pushGoogleDrive(body) {
   const cfg = state.cloudConfig.google;
   if (!cfg.fileId) throw new Error('No hay archivo de Drive conectado');
-  const body = JSON.stringify(buildBackup());
   const resp = await driveRequest(
     `https://www.googleapis.com/upload/drive/v3/files/${cfg.fileId}?uploadType=media`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }
@@ -778,9 +809,8 @@ async function connectWebDAV() {
   }
 }
 
-async function pushWebDAV() {
+async function pushWebDAV(body) {
   const cfg = state.cloudConfig.webdav;
-  const body = JSON.stringify(buildBackup());
   const resp = await webdavRequest(cfg.url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -804,17 +834,40 @@ function connectedProvider() {
   return 'none';
 }
 
+async function fetchRemoteBackup() {
+  const provider = connectedProvider();
+  if (provider === 'google') return pullGoogleDrive();
+  if (provider === 'webdav') return pullWebDAV();
+  return null;
+}
+
 async function pushToCloud() {
   const provider = connectedProvider();
   setSyncStatus('syncing', '');
   try {
     let bytes;
-    if (provider === 'google') bytes = await pushGoogleDrive();
-    else if (provider === 'webdav') bytes = await pushWebDAV();
-    else {
+    if (provider === 'none') {
       await new Promise((r) => setTimeout(r, 600));
       bytes = new Blob([JSON.stringify(buildBackup())]).size;
+      markSynced(bytes);
+      return;
     }
+    let remote = null;
+    try {
+      const candidate = await fetchRemoteBackup();
+      if (isValidBackup(candidate)) remote = candidate;
+    } catch (e) {
+      remote = null;
+    }
+    let body;
+    if (remote) {
+      const merged = mergeBackups(buildBackup(), remote);
+      body = JSON.stringify(merged);
+      applyBackup(merged);
+    } else {
+      body = JSON.stringify(buildBackup());
+    }
+    bytes = provider === 'google' ? await pushGoogleDrive(body) : await pushWebDAV(body);
     markSynced(bytes);
   } catch (e) {
     setSyncStatus('error', syncErrorMessage(e));
@@ -831,9 +884,11 @@ async function pullFromCloud() {
   setSyncStatus('syncing', '');
   try {
     const data = provider === 'google' ? await pullGoogleDrive() : await pullWebDAV();
-    applyBackup(data);
+    if (!isValidBackup(data)) throw new Error('El archivo no es un respaldo válido de AgendaDigital');
+    const merged = mergeBackups(buildBackup(), data);
+    applyBackup(merged);
     markSynced();
-    toast('Datos descargados y restaurados desde tu nube');
+    toast('Datos fusionados con tu nube (los más recientes ganan en cada elemento)');
   } catch (e) {
     setSyncStatus('error', syncErrorMessage(e));
     toast(syncErrorMessage(e));
@@ -847,7 +902,7 @@ function requestPull() {
     return;
   }
   showConfirmDialog(
-    'Se descargará el respaldo de tu nube y se reemplazarán los datos locales actuales. ¿Continuar?',
+    'Se fusionarán los datos de tu nube con los de este dispositivo. En los elementos modificados en ambos lados ganará la versión más reciente. ¿Continuar?',
     pullFromCloud
   );
 }
@@ -1127,7 +1182,8 @@ function saveDialog() {
       isCompleted: existing?.isCompleted || false,
       hasReminder,
       reminderMinutesBefore: 15,
-      createdAtMillis: existing?.createdAtMillis || Date.now()
+      createdAtMillis: existing?.createdAtMillis || Date.now(),
+      updatedAtMillis: Date.now()
     };
     if (editId) {
       state.agendaItems = state.agendaItems.map((i) => Number(i.id) === editId ? item : i);
@@ -1169,6 +1225,7 @@ function saveDialog() {
       streakDays: existing?.streakDays || 0,
       lastCompletedEpochDay: existing?.lastCompletedEpochDay || -1,
       targetDaysPerWeek: targetDays,
+      updatedAtMillis: Date.now(),
       iconName: 'CheckCircle'
     };
     if (editId) {
@@ -1195,6 +1252,7 @@ function toggleTask(id) {
   const item = state.agendaItems.find((i) => Number(i.id) === Number(id));
   if (!item) return;
   item.isCompleted = !item.isCompleted;
+  item.updatedAtMillis = Date.now();
   saveState();
   renderAll();
   triggerAutoSync();
@@ -1236,6 +1294,7 @@ function toggleHabit(id) {
     habit.streakDays = (habit.streakDays || 0) + 1;
     habit.lastCompletedEpochDay = todayEpoch;
   }
+  habit.updatedAtMillis = Date.now();
   saveState();
   renderTasks();
   triggerAutoSync();
