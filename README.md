@@ -53,7 +53,8 @@ En la pestaña **Nube → "Mi Nube Personal"** puedes conectar tu propia nube y 
 ### Sincronizar
 - **Subir datos**: sube tus datos locales a tu nube. Antes de subir, **fusiona** con el respaldo remoto para no perder cambios hechos en otros dispositivos.
 - **Descargar datos**: descarga el respaldo de tu nube y lo **fusiona** con los datos locales (pide confirmación).
-- **Fusión**: se unen los elementos de ambos lados; cuando el mismo elemento fue modificado en ambos, gana la versión más reciente. Eliminaciones en un solo dispositivo no se propagan a la nube.
+- **Fusión**: se unen los elementos de ambos lados; cuando el mismo elemento fue modificado en ambos, gana la versión más reciente.
+- **Eliminaciones**: se propagan entre dispositivos mediante *tombstones*. Si editas un elemento después de eliminarlo, la edición más reciente gana y se restaura. Los respaldos antiguos sin tombstones siguen siendo válidos.
 - La **auto-sincronización** sube los cambios automáticamente tras cada edición si está activa.
 
 ## 🧑‍💻 Desarrollo

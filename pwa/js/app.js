@@ -73,6 +73,7 @@ function loadState() {
       s.cloudConfig.webdav = Object.assign(defaultCloudConfig().webdav, s.cloudConfig.webdav || {});
       s.syncStatus = s.syncStatus || 'synced';
       s.syncError = s.syncError || '';
+      s.tombstones = Array.isArray(s.tombstones) ? s.tombstones : [];
       s.selectedDate = s.selectedDate != null ? s.selectedDate : toEpochDay(new Date());
       s.searchQuery = s.searchQuery || '';
       s.selectedCategory = s.selectedCategory || null;
@@ -143,6 +144,7 @@ function seedSampleData() {
       { id: 2, title: 'Leer 20 Páginas', category: 'Estudios', streakDays: 12, lastCompletedEpochDay: today, targetDaysPerWeek: 7 },
       { id: 3, title: 'Meditación 10 Minutos', category: 'Bienestar', streakDays: 3, lastCompletedEpochDay: today - 1, targetDaysPerWeek: 5 }
     ],
+    tombstones: [],
     profile: defaultProfile(),
     cloudConfig: defaultCloudConfig(),
     syncStatus: 'synced',
@@ -222,8 +224,14 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-function nextId(list) {
-  return list.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1;
+function nextId(list, type) {
+  let max = list.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
+  if (type && Array.isArray(state.tombstones)) {
+    state.tombstones.forEach((t) => {
+      if (t.type === type) max = Math.max(max, Number(t.id) || 0);
+    });
+  }
+  return max + 1;
 }
 
 let toastTimer = null;
@@ -541,7 +549,8 @@ function buildBackup() {
     exportDateMillis: Date.now(),
     agendaItems: state.agendaItems,
     notes: state.notes,
-    habits: state.habits
+    habits: state.habits,
+    tombstones: state.tombstones || []
   };
 }
 
@@ -550,13 +559,29 @@ function isValidBackup(data) {
     Array.isArray(data.agendaItems) && Array.isArray(data.notes) && Array.isArray(data.habits);
 }
 
+function applyTombstones(arr, type, tombstones) {
+  return arr.filter((it) => {
+    const ts = tombstones.find((t) => t.type === type && Number(t.id) === Number(it.id));
+    return !ts || itemChangeTime(it) > (ts.updatedAtMillis || 0);
+  });
+}
+
 function applyBackup(data) {
   if (!isValidBackup(data)) throw new Error('El archivo no es un respaldo válido de AgendaDigital');
-  state.agendaItems = data.agendaItems;
-  state.notes = data.notes;
-  state.habits = data.habits;
+  state.tombstones = data.tombstones || [];
+  state.agendaItems = applyTombstones(data.agendaItems, 'agenda', state.tombstones);
+  state.notes = applyTombstones(data.notes, 'note', state.tombstones);
+  state.habits = applyTombstones(data.habits, 'habit', state.tombstones);
   saveState();
   renderAll();
+}
+
+function recordTombstone(type, id) {
+  state.tombstones = Array.isArray(state.tombstones) ? state.tombstones : [];
+  state.tombstones.push({ id: Number(id), type, updatedAtMillis: Date.now() });
+  if (state.tombstones.length > 500) {
+    state.tombstones = state.tombstones.slice(state.tombstones.length - 500);
+  }
 }
 
 function itemChangeTime(item) {
@@ -578,16 +603,44 @@ function mergeItemList(localArr, remoteArr) {
   return [...map.values()].map((v) => v.item);
 }
 
+function mergeTombstones(local, remote) {
+  const map = new Map();
+  for (const t of local) {
+    const key = (t.type || '') + ':' + Number(t.id);
+    map.set(key, { item: t });
+  }
+  for (const t of remote) {
+    const key = (t.type || '') + ':' + Number(t.id);
+    const existing = map.get(key);
+    if (!existing || (t.updatedAtMillis || 0) > (existing.item.updatedAtMillis || 0)) {
+      map.set(key, { item: t });
+    }
+  }
+  return [...map.values()].map((v) => v.item);
+}
+
 function mergeBackups(localData, remoteData) {
   if (!isValidBackup(localData)) throw new Error('Los datos locales no son un respaldo válido');
   if (!isValidBackup(remoteData)) throw new Error('El respaldo de la nube no es válido');
+  const tombstones = mergeTombstones(localData.tombstones || [], remoteData.tombstones || []);
+  const agendaItems = applyTombstones(mergeItemList(localData.agendaItems, remoteData.agendaItems), 'agenda', tombstones);
+  const notes = applyTombstones(mergeItemList(localData.notes, remoteData.notes), 'note', tombstones);
+  const habits = applyTombstones(mergeItemList(localData.habits, remoteData.habits), 'habit', tombstones);
+  const surviving = new Set([
+    ...agendaItems.map((i) => 'agenda:' + Number(i.id)),
+    ...notes.map((i) => 'note:' + Number(i.id)),
+    ...habits.map((i) => 'habit:' + Number(i.id))
+  ]);
+  const prunedTombstones = tombstones.filter((t) => {
+    const key = (t.type || '') + ':' + Number(t.id);
+    return !surviving.has(key);
+  });
   return {
     appName: 'AgendaDigital',
     appVersion: 1,
     exportDateMillis: Date.now(),
-    agendaItems: mergeItemList(localData.agendaItems, remoteData.agendaItems),
-    notes: mergeItemList(localData.notes, remoteData.notes),
-    habits: mergeItemList(localData.habits, remoteData.habits)
+    agendaItems, notes, habits,
+    tombstones: prunedTombstones
   };
 }
 
@@ -1170,7 +1223,7 @@ function saveDialog() {
     const hasReminder = document.getElementById('d-reminder').checked;
     const existing = state.agendaItems.find((i) => Number(i.id) === editId);
     const item = {
-      id: editId || nextId(state.agendaItems),
+      id: editId || nextId(state.agendaItems, 'agenda'),
       title,
       description,
       dateEpochDay: existing ? existing.dateEpochDay : state.selectedDate,
@@ -1198,7 +1251,7 @@ function saveDialog() {
     const colorHex = dialog.querySelector('#d-colors .color-dot.selected')?.dataset.color || '#3F51B5';
     const existing = state.notes.find((n) => Number(n.id) === editId);
     const note = {
-      id: editId || nextId(state.notes),
+      id: editId || nextId(state.notes, 'note'),
       title,
       content: description,
       category: selectedCat,
@@ -1219,7 +1272,7 @@ function saveDialog() {
     const targetDays = Number(document.getElementById('d-target').value) || 7;
     const existing = state.habits.find((h) => Number(h.id) === editId);
     const habit = {
-      id: editId || nextId(state.habits),
+      id: editId || nextId(state.habits, 'habit'),
       title,
       category: selectedCat,
       streakDays: existing?.streakDays || 0,
@@ -1259,6 +1312,7 @@ function toggleTask(id) {
 }
 
 function deleteItem(id) {
+  recordTombstone('agenda', id);
   state.agendaItems = state.agendaItems.filter((i) => Number(i.id) !== Number(id));
   saveState();
   renderAll();
@@ -1276,6 +1330,7 @@ function toggleNotePin(id) {
 }
 
 function deleteNote(id) {
+  recordTombstone('note', id);
   state.notes = state.notes.filter((n) => Number(n.id) !== Number(id));
   saveState();
   renderNotes();
@@ -1301,6 +1356,7 @@ function toggleHabit(id) {
 }
 
 function deleteHabit(id) {
+  recordTombstone('habit', id);
   state.habits = state.habits.filter((h) => Number(h.id) !== Number(id));
   saveState();
   renderTasks();
