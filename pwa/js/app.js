@@ -41,6 +41,15 @@ const SVG = {
 
 let state = loadState();
 
+function defaultCloudConfig() {
+  return {
+    provider: 'none',
+    google: { apiKey: '', clientId: '', fileId: '', fileName: '', token: '', tokenExpiry: 0 },
+    webdav: { url: '', username: '', password: '' },
+    autoSync: true
+  };
+}
+
 function defaultProfile() {
   return {
     userEmail: 'usuario@agendadigital.app',
@@ -59,7 +68,11 @@ function loadState() {
     if (raw) {
       const s = JSON.parse(raw);
       s.profile = Object.assign(defaultProfile(), s.profile);
+      s.cloudConfig = Object.assign(defaultCloudConfig(), s.cloudConfig || {});
+      s.cloudConfig.google = Object.assign(defaultCloudConfig().google, s.cloudConfig.google || {});
+      s.cloudConfig.webdav = Object.assign(defaultCloudConfig().webdav, s.cloudConfig.webdav || {});
       s.syncStatus = s.syncStatus || 'synced';
+      s.syncError = s.syncError || '';
       s.selectedDate = s.selectedDate != null ? s.selectedDate : toEpochDay(new Date());
       s.searchQuery = s.searchQuery || '';
       s.selectedCategory = s.selectedCategory || null;
@@ -131,7 +144,9 @@ function seedSampleData() {
       { id: 3, title: 'Meditación 10 Minutos', category: 'Bienestar', streakDays: 3, lastCompletedEpochDay: today - 1, targetDaysPerWeek: 5 }
     ],
     profile: defaultProfile(),
+    cloudConfig: defaultCloudConfig(),
     syncStatus: 'synced',
+    syncError: '',
     selectedDate: today,
     searchQuery: '',
     selectedCategory: null
@@ -448,10 +463,54 @@ function renderCloud() {
   document.getElementById('backup-count').textContent = p.cloudBackupCount + ' Respaldos en nube';
 
   const syncing = state.syncStatus === 'syncing';
+  const error = state.syncStatus === 'error';
   document.getElementById('sync-dot').classList.toggle('syncing', syncing);
-  document.getElementById('sync-text').textContent = syncing ? 'Sincronizando...' : 'Nube conectada';
+  document.getElementById('sync-text').textContent = syncing ? 'Sincronizando...' : (error ? 'Error de sincronización' : 'Nube conectada');
   document.getElementById('cloud-sync-dot').classList.toggle('syncing', syncing);
-  document.getElementById('cloud-sync-text').textContent = syncing ? 'Sincronizando cambios...' : 'Sincronizado';
+  document.getElementById('cloud-sync-text').textContent = syncing ? 'Sincronizando cambios...' : (error ? (state.syncError || 'Error') : 'Sincronizado');
+
+  renderProviderConfig();
+}
+
+function renderProviderConfig() {
+  const cfg = state.cloudConfig;
+
+  document.querySelectorAll('#provider-chips .chip').forEach((c) => {
+    c.classList.toggle('selected', c.dataset.provider === cfg.provider);
+  });
+
+  const gPanel = document.getElementById('google-panel');
+  const wPanel = document.getElementById('webdav-panel');
+  gPanel.classList.toggle('hidden', cfg.provider !== 'google');
+  wPanel.classList.toggle('hidden', cfg.provider !== 'webdav');
+
+  document.getElementById('g-api-key').value = cfg.google.apiKey || '';
+  document.getElementById('g-client-id').value = cfg.google.clientId || '';
+  document.getElementById('w-url').value = cfg.webdav.url || '';
+  document.getElementById('w-user').value = cfg.webdav.username || '';
+  document.getElementById('w-pass').value = cfg.webdav.password || '';
+
+  const gStatus = document.getElementById('google-status');
+  if (cfg.provider === 'google' && cfg.google.fileId) {
+    gStatus.className = 'conn-status ok';
+    gStatus.innerHTML = `<span class="sync-dot"></span> Conectado a: <span class="file-name" style="font-weight:700">${esc(cfg.google.fileName || 'archivo de Drive')}</span>`;
+    document.getElementById('btn-g-disconnect').classList.remove('hidden');
+  } else if (cfg.provider === 'google') {
+    gStatus.className = 'conn-status';
+    gStatus.innerHTML = `<span class="sync-dot"></span> Configura las claves y elige o crea un archivo JSON en tu Drive.`;
+    document.getElementById('btn-g-disconnect').classList.add('hidden');
+  }
+
+  const wStatus = document.getElementById('webdav-status');
+  if (cfg.provider === 'webdav' && cfg.webdav.url) {
+    wStatus.className = 'conn-status ok';
+    wStatus.innerHTML = `<span class="sync-dot"></span> WebDAV conectado`;
+    document.getElementById('btn-w-disconnect').classList.remove('hidden');
+  } else if (cfg.provider === 'webdav') {
+    wStatus.className = 'conn-status';
+    wStatus.innerHTML = `<span class="sync-dot"></span> Indica la URL del archivo de respaldo y tus credenciales.`;
+    document.getElementById('btn-w-disconnect').classList.add('hidden');
+  }
 }
 
 /* ---------------- Navigation ---------------- */
@@ -475,38 +534,348 @@ function switchTTab(t) {
 
 /* ---------------- Sync / Cloud ---------------- */
 
-function performSync(delayMs) {
-  state.syncStatus = 'syncing';
+function buildBackup() {
+  return {
+    appName: 'AgendaDigital',
+    appVersion: 1,
+    exportDateMillis: Date.now(),
+    agendaItems: state.agendaItems,
+    notes: state.notes,
+    habits: state.habits
+  };
+}
+
+function isValidBackup(data) {
+  return data && data.appName === 'AgendaDigital' &&
+    Array.isArray(data.agendaItems) && Array.isArray(data.notes) && Array.isArray(data.habits);
+}
+
+function applyBackup(data) {
+  if (!isValidBackup(data)) throw new Error('El archivo no es un respaldo válido de AgendaDigital');
+  state.agendaItems = data.agendaItems;
+  state.notes = data.notes;
+  state.habits = data.habits;
+  saveState();
+  renderAll();
+}
+
+function setSyncStatus(status, message) {
+  state.syncStatus = status;
+  state.syncError = message || '';
+  saveState();
   renderCloud();
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      state.syncStatus = 'synced';
-      const p = state.profile;
-      p.lastSyncTimeMillis = Date.now();
-      if (delayMs > 900) {
-        p.cloudBackupCount += 1;
-        p.storageUsedMb = Math.round((p.storageUsedMb + 0.1) * 100) / 100;
-      }
-      state.agendaItems.forEach((i) => { i.isSynced = true; });
-      saveState();
-      renderCloud();
-      resolve();
-    }, delayMs || 800);
+}
+
+function markSynced(bytes) {
+  state.syncStatus = 'synced';
+  state.syncError = '';
+  const p = state.profile;
+  p.lastSyncTimeMillis = Date.now();
+  if (bytes != null) {
+    p.storageUsedMb = Math.round((bytes / 1048576) * 100) / 100;
+  }
+  state.agendaItems.forEach((i) => { i.isSynced = true; });
+  saveState();
+  renderCloud();
+}
+
+function syncErrorMessage(e) {
+  let msg = e && e.message ? e.message : String(e);
+  if (/401|403/.test(msg)) msg = 'Acceso denegado. Revisa las credenciales o vuelve a conectar tu nube.';
+  else if (/Failed to fetch|NetworkError|fetch/i.test(msg)) msg = 'No se pudo conectar con tu nube. Revisa tu conexión.';
+  return msg;
+}
+
+/* --- Google Drive --- */
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('No se pudo cargar el script de Google'));
+    document.head.appendChild(s);
   });
+}
+
+let googleLibsLoaded = false;
+async function loadGoogleLibs() {
+  if (googleLibsLoaded) return;
+  await loadScript('https://accounts.google.com/gsi/client');
+  await loadScript('https://apis.google.com/js/api.js');
+  await new Promise((resolve, reject) => {
+    gapi.load('picker', { callback: resolve, onerror: reject });
+  });
+  googleLibsLoaded = true;
+}
+
+function ensureDriveToken() {
+  const cfg = state.cloudConfig.google;
+  if (cfg.token && Date.now() < cfg.tokenExpiry) return Promise.resolve(cfg.token);
+  return new Promise((resolve, reject) => {
+    const tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: cfg.clientId,
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: (resp) => {
+        if (resp.error) {
+          reject(new Error('No se pudo autorizar el acceso a Google: ' + resp.error));
+          return;
+        }
+        cfg.token = resp.access_token;
+        cfg.tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
+        saveState();
+        resolve(resp.access_token);
+      }
+    });
+    tokenClient.requestAccessToken();
+  });
+}
+
+async function driveRequest(url, options) {
+  const token = await ensureDriveToken();
+  const resp = await fetch(url, {
+    ...options,
+    headers: { ...(options && options.headers), 'Authorization': 'Bearer ' + token }
+  });
+  if (!resp.ok) {
+    throw new Error('Google Drive: HTTP ' + resp.status);
+  }
+  return resp;
+}
+
+function openDrivePicker() {
+  const cfg = state.cloudConfig.google;
+  const picker = new google.picker.PickerBuilder()
+    .addView(
+      new google.picker.DocsView(google.picker.ViewId.DOCS)
+        .setIncludeFolders(false)
+        .setSelectFolderEnabled(false)
+    )
+    .setOAuthToken(cfg.token)
+    .setDeveloperKey(cfg.apiKey)
+    .setCallback((data) => {
+      if (data.action === 'picked' && data.docs && data.docs[0]) {
+        const doc = data.docs[0];
+        cfg.fileId = doc.id;
+        cfg.fileName = doc.name;
+        state.cloudConfig.provider = 'google';
+        saveState();
+        renderCloud();
+        toast('Conectado a: ' + doc.name);
+      } else if (data.action === 'cancel') {
+        toast('Selección cancelada');
+      }
+    })
+    .build();
+  picker.setVisible(true);
+}
+
+async function connectGoogleDrive() {
+  const cfg = state.cloudConfig.google;
+  if (!cfg.apiKey.trim() || !cfg.clientId.trim()) {
+    toast('Configura la API Key y el Client ID de Google primero');
+    return;
+  }
+  setSyncStatus('syncing', '');
+  try {
+    await loadGoogleLibs();
+    await ensureDriveToken();
+    openDrivePicker();
+    setSyncStatus('synced', '');
+  } catch (e) {
+    setSyncStatus('error', syncErrorMessage(e));
+    toast(syncErrorMessage(e));
+  }
+}
+
+async function createDriveFile() {
+  const cfg = state.cloudConfig.google;
+  if (!cfg.apiKey.trim() || !cfg.clientId.trim()) {
+    toast('Configura la API Key y el Client ID de Google primero');
+    return;
+  }
+  setSyncStatus('syncing', '');
+  try {
+    await loadGoogleLibs();
+    await ensureDriveToken();
+    const resp = await driveRequest('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'agendadigital-backup.json', mimeType: 'application/json' })
+    });
+    const file = await resp.json();
+    cfg.fileId = file.id;
+    cfg.fileName = file.name;
+    state.cloudConfig.provider = 'google';
+    saveState();
+    renderCloud();
+    await pushToCloud();
+    toast('Archivo de respaldo creado en tu Drive');
+  } catch (e) {
+    setSyncStatus('error', syncErrorMessage(e));
+    toast(syncErrorMessage(e));
+  }
+}
+
+async function pushGoogleDrive() {
+  const cfg = state.cloudConfig.google;
+  if (!cfg.fileId) throw new Error('No hay archivo de Drive conectado');
+  const body = JSON.stringify(buildBackup());
+  const resp = await driveRequest(
+    `https://www.googleapis.com/upload/drive/v3/files/${cfg.fileId}?uploadType=media`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }
+  );
+  if (!resp.ok) throw new Error('Google Drive: HTTP ' + resp.status);
+  return new Blob([body]).size;
+}
+
+async function pullGoogleDrive() {
+  const cfg = state.cloudConfig.google;
+  if (!cfg.fileId) throw new Error('No hay archivo de Drive conectado');
+  const resp = await driveRequest(`https://www.googleapis.com/drive/v3/files/${cfg.fileId}?alt=media`, { method: 'GET' });
+  return resp.json();
+}
+
+/* --- WebDAV --- */
+
+function webdavAuthHeader() {
+  const { username, password } = state.cloudConfig.webdav;
+  return 'Basic ' + btoa(unescape(encodeURIComponent(username + ':' + password)));
+}
+
+async function webdavRequest(url, options) {
+  const cfg = state.cloudConfig.webdav;
+  if (!cfg.url.trim()) throw new Error('Configura la URL WebDAV');
+  const resp = await fetch(url, {
+    ...options,
+    headers: { ...(options && options.headers), 'Authorization': webdavAuthHeader() }
+  });
+  if (resp.status === 401 || resp.status === 403) throw new Error('Credenciales WebDAV inválidas');
+  if (resp.status === 404) throw new Error('El archivo WebDAV no existe (¿la carpeta padre existe?)');
+  if (!resp.ok) throw new Error('WebDAV: HTTP ' + resp.status);
+  return resp;
+}
+
+async function connectWebDAV() {
+  const cfg = state.cloudConfig.webdav;
+  if (!cfg.url.trim() || !cfg.username.trim() || !cfg.password) {
+    toast('Completa URL, usuario y contraseña');
+    return;
+  }
+  setSyncStatus('syncing', '');
+  try {
+    state.cloudConfig.provider = 'webdav';
+    saveState();
+    renderCloud();
+    await pushToCloud();
+    toast('WebDAV conectado y respaldo inicial subido');
+  } catch (e) {
+    state.cloudConfig.provider = 'none';
+    saveState();
+    setSyncStatus('error', syncErrorMessage(e));
+    toast(syncErrorMessage(e));
+  }
+}
+
+async function pushWebDAV() {
+  const cfg = state.cloudConfig.webdav;
+  const body = JSON.stringify(buildBackup());
+  const resp = await webdavRequest(cfg.url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body
+  });
+  return new Blob([body]).size;
+}
+
+async function pullWebDAV() {
+  const cfg = state.cloudConfig.webdav;
+  const resp = await webdavRequest(cfg.url, { method: 'GET' });
+  return resp.json();
+}
+
+/* --- Orchestration --- */
+
+function connectedProvider() {
+  const cfg = state.cloudConfig;
+  if (cfg.provider === 'google' && cfg.google.fileId) return 'google';
+  if (cfg.provider === 'webdav' && cfg.webdav.url) return 'webdav';
+  return 'none';
+}
+
+async function pushToCloud() {
+  const provider = connectedProvider();
+  setSyncStatus('syncing', '');
+  try {
+    let bytes;
+    if (provider === 'google') bytes = await pushGoogleDrive();
+    else if (provider === 'webdav') bytes = await pushWebDAV();
+    else {
+      await new Promise((r) => setTimeout(r, 600));
+      bytes = new Blob([JSON.stringify(buildBackup())]).size;
+    }
+    markSynced(bytes);
+  } catch (e) {
+    setSyncStatus('error', syncErrorMessage(e));
+    throw e;
+  }
+}
+
+async function pullFromCloud() {
+  const provider = connectedProvider();
+  if (provider === 'none') {
+    toast('No hay nube personal conectada');
+    return;
+  }
+  setSyncStatus('syncing', '');
+  try {
+    const data = provider === 'google' ? await pullGoogleDrive() : await pullWebDAV();
+    applyBackup(data);
+    markSynced();
+    toast('Datos descargados y restaurados desde tu nube');
+  } catch (e) {
+    setSyncStatus('error', syncErrorMessage(e));
+    toast(syncErrorMessage(e));
+  }
+}
+
+function requestPull() {
+  const provider = connectedProvider();
+  if (provider === 'none') {
+    toast('Conecta una nube personal (Google Drive o WebDAV) para sincronizar');
+    return;
+  }
+  showConfirmDialog(
+    'Se descargará el respaldo de tu nube y se reemplazarán los datos locales actuales. ¿Continuar?',
+    pullFromCloud
+  );
 }
 
 async function triggerAutoSync() {
   if (state.profile.isAutoSync) {
-    await performSync(800);
+    try {
+      await pushToCloud();
+    } catch (e) {
+      console.warn('Auto-sync falló:', e);
+    }
   }
 }
 
 async function performManualCloudSync() {
   const btn = document.getElementById('btn-manual-sync');
   btn.disabled = true;
-  await performSync(1200);
+  try {
+    await pushToCloud();
+    if (connectedProvider() === 'none') {
+      toast('Sin nube personal conectada (demo local). Conecta Google Drive o WebDAV.');
+    } else {
+      toast('Datos sincronizados con tu nube');
+    }
+  } catch (e) {
+    toast(syncErrorMessage(e));
+  }
   btn.disabled = false;
-  toast('Datos sincronizados con la nube');
 }
 
 /* ---------------- Notifications ---------------- */
@@ -569,6 +938,19 @@ function showExportDialog(json) {
       <button class="btn-cancel" data-action="close-dialog">Cerrar</button>
     </div>`;
   overlay.classList.remove('hidden');
+}
+
+function showConfirmDialog(message, onConfirm) {
+  const overlay = document.getElementById('dialog-overlay');
+  document.getElementById('dialog').innerHTML = `
+    <div class="dialog-title">Confirmar</div>
+    <p class="confirm-text">${esc(message)}</p>
+    <div class="dialog-actions">
+      <button class="btn-cancel" data-action="close-dialog">Cancelar</button>
+      <button class="btn-save" data-action="confirm-pull">Descargar y reemplazar</button>
+    </div>`;
+  overlay.classList.remove('hidden');
+  window._pullConfirm = onConfirm;
 }
 
 /* ---------------- Add/Edit Dialog ---------------- */
@@ -941,6 +1323,18 @@ document.addEventListener('click', (e) => {
     case 'close-dialog':
       closeDialog();
       break;
+    case 'confirm-pull':
+      closeDialog();
+      if (typeof window._pullConfirm === 'function') {
+        window._pullConfirm();
+        window._pullConfirm = null;
+      }
+      break;
+    case 'provider-select':
+      state.cloudConfig.provider = el.dataset.provider;
+      saveState();
+      renderProviderConfig();
+      break;
     case 'ttab':
       switchTTab(el.dataset.ttab);
       break;
@@ -958,6 +1352,32 @@ document.getElementById('btn-add').addEventListener('click', openAddDialog);
 document.getElementById('btn-manual-sync').addEventListener('click', performManualCloudSync);
 document.getElementById('btn-test-notif').addEventListener('click', testNotification);
 document.getElementById('btn-export').addEventListener('click', exportDataAsJson);
+document.getElementById('btn-push').addEventListener('click', performManualCloudSync);
+document.getElementById('btn-pull').addEventListener('click', requestPull);
+document.getElementById('btn-g-pick').addEventListener('click', connectGoogleDrive);
+document.getElementById('btn-g-create').addEventListener('click', createDriveFile);
+document.getElementById('btn-w-connect').addEventListener('click', connectWebDAV);
+document.getElementById('btn-g-disconnect').addEventListener('click', () => {
+  const cfg = state.cloudConfig;
+  cfg.provider = 'none';
+  cfg.google.fileId = '';
+  cfg.google.fileName = '';
+  cfg.google.token = '';
+  cfg.google.tokenExpiry = 0;
+  saveState();
+  renderProviderConfig();
+  toast('Google Drive desconectado');
+});
+document.getElementById('btn-w-disconnect').addEventListener('click', () => {
+  const cfg = state.cloudConfig;
+  cfg.provider = 'none';
+  cfg.webdav.url = '';
+  cfg.webdav.username = '';
+  cfg.webdav.password = '';
+  saveState();
+  renderProviderConfig();
+  toast('WebDAV desconectado');
+});
 document.getElementById('btn-prev-month').addEventListener('click', () => {
   const d = fromEpochDay(state.selectedDate);
   state.selectedDate = toEpochDay(new Date(d.getFullYear(), d.getMonth() - 1, d.getDate()));
@@ -986,6 +1406,35 @@ document.getElementById('chip-pending').addEventListener('click', () => {
 });
 document.getElementById('dialog-overlay').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeDialog();
+});
+
+document.querySelectorAll('#provider-chips .chip').forEach((c) => {
+  c.addEventListener('click', () => {
+    state.cloudConfig.provider = c.dataset.provider;
+    saveState();
+    renderProviderConfig();
+  });
+});
+
+document.getElementById('g-api-key').addEventListener('input', (e) => {
+  state.cloudConfig.google.apiKey = e.target.value.trim();
+  saveState();
+});
+document.getElementById('g-client-id').addEventListener('input', (e) => {
+  state.cloudConfig.google.clientId = e.target.value.trim();
+  saveState();
+});
+document.getElementById('w-url').addEventListener('input', (e) => {
+  state.cloudConfig.webdav.url = e.target.value.trim();
+  saveState();
+});
+document.getElementById('w-user').addEventListener('input', (e) => {
+  state.cloudConfig.webdav.username = e.target.value.trim();
+  saveState();
+});
+document.getElementById('w-pass').addEventListener('input', (e) => {
+  state.cloudConfig.webdav.password = e.target.value;
+  saveState();
 });
 
 document.querySelectorAll('.nav-item').forEach((b) => {

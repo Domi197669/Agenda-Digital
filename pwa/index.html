@@ -157,14 +157,60 @@
           </div>
 
           <div class="cloud-actions">
+            <button id="btn-push" class="btn filled">
+              <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              Subir datos
+            </button>
+            <button id="btn-pull" class="btn outlined">
+              <svg viewBox="0 0 24 24"><path d="M5 9h4V3h6v6h4l-7 7-7-7zM5 18v2h14v-2H5z"/></svg>
+              Descargar datos
+            </button>
             <button id="btn-test-notif" class="btn outlined">
               <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
               Probar Notificación
             </button>
-            <button id="btn-export" class="btn filled">
-              <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            <button id="btn-export" class="btn outlined">
+              <svg viewBox="0 0 24 24"><path d="M19 3H4.99C3.88 3 3 3.9 3 5v14c0 1.1.88 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 12h-4c0 1.66-1.35 3-3 3s-3-1.34-3-3H4.99V5H19v10z"/></svg>
               Exportar JSON
             </button>
+          </div>
+        </div>
+
+        <div class="card cloud-card">
+          <h2 class="cloud-subtitle">Mi Nube Personal</h2>
+          <p class="muted small cloud-hint">Conecta tu propia nube (Google Drive o WebDAV) para sincronizar tus datos de verdad entre dispositivos.</p>
+
+          <div class="chips-row" id="provider-chips">
+            <button class="chip" data-provider="none">Ninguna</button>
+            <button class="chip" data-provider="google">Google Drive</button>
+            <button class="chip" data-provider="webdav">WebDAV</button>
+          </div>
+
+          <div id="google-panel" class="provider-panel hidden">
+            <div id="google-status" class="conn-status"></div>
+            <label class="field-label" for="g-api-key">API Key de Google Cloud</label>
+            <input id="g-api-key" class="input" type="text" placeholder="AIzaSy..." autocomplete="off" spellcheck="false" />
+            <label class="field-label" for="g-client-id">OAuth Client ID</label>
+            <input id="g-client-id" class="input" type="text" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" />
+            <div class="btn-col">
+              <button id="btn-g-pick" class="btn filled">Elegir archivo en Drive</button>
+              <button id="btn-g-create" class="btn outlined">Crear archivo de respaldo</button>
+            </div>
+            <button id="btn-g-disconnect" class="btn ghost hidden">Desconectar Google Drive</button>
+          </div>
+
+          <div id="webdav-panel" class="provider-panel hidden">
+            <div id="webdav-status" class="conn-status"></div>
+            <label class="field-label" for="w-url">URL del archivo (WebDAV)</label>
+            <input id="w-url" class="input" type="text" placeholder="https://nubedominio/remote.php/dav/files/usuario/AgendaDigital/agendadigital.json" autocomplete="off" spellcheck="false" />
+            <label class="field-label" for="w-user">Usuario</label>
+            <input id="w-user" class="input" type="text" autocomplete="off" spellcheck="false" />
+            <label class="field-label" for="w-pass">Contraseña</label>
+            <input id="w-pass" class="input" type="password" autocomplete="off" />
+            <div class="btn-col">
+              <button id="btn-w-connect" class="btn filled">Guardar y conectar</button>
+            </div>
+            <button id="btn-w-disconnect" class="btn ghost hidden">Desconectar WebDAV</button>
           </div>
         </div>
 

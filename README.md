@@ -28,8 +28,32 @@
 - ✅ **Tareas**: lista de pendientes con seguimiento de progreso diario.
 - 🔥 **Hábitos**: rachas diarias y metas semanales.
 - 📝 **Notas**: notas fijadas, colores y categorías.
-- ☁️ **Nube**: sincronización simulada, notificaciones y exportación de respaldo JSON.
+- ☁️ **Nube**: sincroniza de verdad con **tu nube personal** (Google Drive o WebDAV), notificaciones y exportación de respaldo JSON.
 - 📴 **Offline**: funciona sin conexión a internet (service worker).
+
+## ☁️ Sincronización con tu nube personal
+
+En la pestaña **Nube → "Mi Nube Personal"** puedes conectar tu propia nube y sincronizar todos tus datos (agenda, tareas, hábitos y notas) entre dispositivos. La configuración se guarda en tu dispositivo.
+
+### Google Drive
+1. Crea un proyecto en [Google Cloud Console](https://console.cloud.google.com/).
+2. Activa las APIs **Google Drive API** y **Google Picker API**.
+3. Crea una **API Key** (credenciales → API keys) y copia su valor.
+4. Configura la **pantalla de consentimiento OAuth** y crea un **OAuth Client ID** de tipo *Web*.
+5. En el Client ID, añade a *Authorized JavaScript origins* tu dominio: `https://domi197669.github.io`.
+6. En la app: pega la **API Key** y el **Client ID**, pulsa **"Elegir archivo en Drive"** (o **"Crear archivo de respaldo"**) y autoriza el acceso.
+
+### WebDAV (Nextcloud, ownCloud, Synology, etc.)
+1. En la app selecciona el proveedor **WebDAV**.
+2. Indica la **URL del archivo** de respaldo, por ejemplo (Nextcloud):
+   `https://tudominio/remote.php/dav/files/usuario/AgendaDigital/agendadigital.json`
+3. Escribe tu **usuario** y **contraseña** (en Nextcloud se recomienda una contraseña de app).
+4. Pulsa **"Guardar y conectar"**. La carpeta padre debe existir y permitir escritura.
+
+### Sincronizar
+- **Subir datos**: sube tus datos locales a tu nube.
+- **Descargar datos**: descarga el respaldo de tu nube y reemplaza los datos locales (pide confirmación).
+- La **auto-sincronización** sube los cambios automáticamente tras cada edición si está activa.
 
 ## 🧑‍💻 Desarrollo
 

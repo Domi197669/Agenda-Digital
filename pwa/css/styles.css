@@ -904,9 +904,99 @@ body {
 }
 
 .cloud-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 16px;
+}
+
+.cloud-subtitle {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.cloud-hint {
+  margin-bottom: 12px;
+}
+
+.provider-panel {
+  margin-top: 14px;
+  border-top: 1px solid var(--outline);
+  padding-top: 14px;
+}
+
+.provider-panel .field-label {
+  margin-top: 10px;
+}
+
+.provider-panel .input {
+  margin-top: 4px;
+}
+
+.btn-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--red-priority);
+  border: 1px solid var(--outline);
+  margin-top: 10px;
+  width: 100%;
+}
+
+.conn-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.conn-status.ok {
+  color: var(--green-success);
+}
+
+.conn-status.err {
+  color: var(--red-priority);
+}
+
+.conn-status .sync-dot {
+  background: var(--green-success);
+}
+
+.conn-status.err .sync-dot {
+  background: var(--red-priority);
+}
+
+.cloud-file-box {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.cloud-file-box .file-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.confirm-text {
+  font-size: 14px;
+  color: var(--on-surface);
+  line-height: 1.5;
 }
 
 .btn {
